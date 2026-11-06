@@ -75,7 +75,8 @@ else:
     st.markdown(f'<div class="eyebrow">{st.session_state.feed.upper()} FEED · BUILT {st.session_state.generated_at}</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     c1.markdown(f'<div class="metric"><div class="metric-label">Stories collected</div><div class="metric-value">{len(frame)}</div></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="metric"><div class="metric-label">Distinct topics</div><div class="metric-value">{frame["ai_topic"].nunique() if "ai_topic" in frame else 0}</div></div>', unsafe_allow_html=True)
+    topics = frame["ai_topic"].replace("", pd.NA).nunique() if "ai_topic" in frame else 0
+    c2.markdown(f'<div class="metric"><div class="metric-label">Distinct topics</div><div class="metric-value">{topics}</div></div>', unsafe_allow_html=True)
     c3.markdown(f'<div class="metric"><div class="metric-label">AI enriched</div><div class="metric-value">{"Yes" if frame.get("ai_summary", pd.Series(dtype=str)).fillna("").ne("").any() else "No"}</div></div>', unsafe_allow_html=True)
     st.write("")
     st.markdown("### Dataset preview")
