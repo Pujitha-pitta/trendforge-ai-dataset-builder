@@ -38,7 +38,7 @@ hr { border-color:var(--line); }
 
 st.markdown('<div class="eyebrow">OPEN DATA PIPELINE · PYTHON + AI</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero">Signal in<br><em>the stream.</em></div>', unsafe_allow_html=True)
-st.markdown('<div class="intro">Collect snapshots from Hacker News, GitHub, or Stack Overflow. Add optional AI labels, inspect the results, and prepare a tidy dataset for Kaggle.</div>', unsafe_allow_html=True)
+st.markdown('<div class="intro">Collect snapshots from Hacker News, GitHub, Stack Overflow, arXiv, or Open Library. Add optional AI labels, inspect the results, and prepare a tidy dataset for Kaggle.</div>', unsafe_allow_html=True)
 st.write("")
 
 with st.sidebar:
