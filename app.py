@@ -38,7 +38,7 @@ hr { border-color:var(--line); }
 
 st.markdown('<div class="eyebrow">OPEN DATA PIPELINE · PYTHON + AI</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero">Signal in<br><em>the stream.</em></div>', unsafe_allow_html=True)
-st.markdown('<div class="intro">Collect snapshots from Hacker News, GitHub, Stack Overflow, arXiv, or Open Library. Add optional AI labels, inspect the results, and prepare a tidy dataset for Kaggle.</div>', unsafe_allow_html=True)
+st.markdown('<div class="intro">Collect snapshots from Hacker News, GitHub, Stack Overflow, arXiv, or Open Library—or search across them for any project topic. Add optional AI labels, inspect the results, and prepare a tidy dataset for Kaggle.</div>', unsafe_allow_html=True)
 st.write("")
 
 with st.sidebar:
@@ -61,9 +61,12 @@ with st.sidebar:
     elif source == "arXiv papers":
         query = st.text_input("Paper search", value="machine learning", help="Searches paper titles, abstracts, and metadata.")
         st.caption("Uses arXiv's public Atom API. Search for research papers by keyword.")
-    else:
+    elif source == "Open Library books":
         query = st.text_input("Book search", value="science", help="Search book titles, authors, and catalog metadata.")
         st.caption("Uses Open Library's public Search API.")
+    else:
+        query = st.text_input("Project name or topic", placeholder="e.g. food waste, health tracking, multiplayer games")
+        st.caption("Searches Hacker News, GitHub, Stack Overflow, arXiv, and Open Library, then combines matching records.")
     count = st.slider("Number of records", min_value=10, max_value=100, value=30, step=10)
     st.caption("Requests are limited to the selected record count (maximum 100).")
     st.markdown("---")
@@ -114,7 +117,12 @@ else:
     st.markdown("---")
     st.markdown("### Prepare for Kaggle")
     username = st.text_input("Your Kaggle username", placeholder="your-kaggle-username")
-    suggested_slug = f"{source_file}-{st.session_state.get('feed', 'snapshot')}-snapshot" if source_file == "hacker_news" else f"{source_file}-snapshot"
+    if source_file == "hacker_news":
+        suggested_slug = f"{source_file}-{st.session_state.get('feed', 'snapshot')}-snapshot"
+    elif source_file == "project_topic":
+        suggested_slug = "project-topic-snapshot"
+    else:
+        suggested_slug = f"{source_file}-snapshot"
     slug = st.text_input("Dataset slug", value=suggested_slug)
     if st.button("Prepare Kaggle package"):
         if not username.strip() or not slug.strip():
