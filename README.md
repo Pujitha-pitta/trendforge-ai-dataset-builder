@@ -48,6 +48,16 @@ python kaggle_upload.py output\hacker-news-top-snapshot --confirm-upload --publi
 
 Kaggle's CLI supports creating datasets from a folder containing `dataset-metadata.json` and data files. Public publication is optional; review the metadata and source terms before choosing it.
 
+### Clean an existing snapshot for a new version
+
+To prepare a reviewed Version 3 package from a downloaded CSV, run:
+
+```cmd
+py clean_dataset.py "C:\path\to\hacker_news_stories.csv" --username your-kaggle-username
+```
+
+The cleaner keeps story rows, excludes the reviewed sample row ID `50378228`, drops AI annotation columns only when entirely blank, checks required fields and duplicate IDs/URLs, and adds `prepared_at_utc`. It writes a new folder under `output/hacker-news-top-snapshot-v3/` and does not upload anything. Review the CSV and source attribution before publishing. If the Kaggle dataset already exists, publish as a new version with `kaggle datasets version`, not `kaggle datasets create`.
+
 ## Dataset schema
 
 `id`, `type`, `title`, `url`, `domain`, `author`, `score`, `comments`, `created_at`, `text`, `ai_topic`, `ai_summary`, `source`.
@@ -61,6 +71,7 @@ trendforge/
 ├── app.py                 # Streamlit interface
 ├── trendforge.py          # API ingestion, normalization, AI enrichment, packaging
 ├── kaggle_upload.py       # Explicit, private-by-default Kaggle uploader
+├── clean_dataset.py       # Clean a downloaded CSV for a reviewed new version
 ├── requirements.txt
 ├── .env.example
 └── output/                # Generated data (git-ignored)
@@ -69,4 +80,3 @@ trendforge/
 ## Data source
 
 Hacker News official API documentation: <https://github.com/HackerNews/API>. This project reads public story metadata from that API. It does not scrape article pages or collect comments or user profiles.
-
