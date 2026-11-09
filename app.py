@@ -38,7 +38,7 @@ hr { border-color:var(--line); }
 
 st.markdown('<div class="eyebrow">OPEN DATA PIPELINE · PYTHON + AI</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero">Signal in<br><em>the stream.</em></div>', unsafe_allow_html=True)
-st.markdown('<div class="intro">Collect snapshots from Hacker News, GitHub, Stack Overflow, arXiv, or Open Library—or search across them for any project topic. Add optional AI labels, inspect the results, and prepare a tidy dataset for Kaggle.</div>', unsafe_allow_html=True)
+st.markdown('<div class="intro">Search across eight public sources for a project topic, or build a weather dataset by location. Add optional AI labels, inspect results, and prepare a tidy Kaggle package.</div>', unsafe_allow_html=True)
 st.write("")
 
 with st.sidebar:
@@ -64,11 +64,26 @@ with st.sidebar:
     elif source == "Open Library books":
         query = st.text_input("Book search", value="science", help="Search book titles, authors, and catalog metadata.")
         st.caption("Uses Open Library's public Search API.")
+    elif source == "Wikipedia articles":
+        query = st.text_input("Article search", placeholder="e.g. renewable energy")
+        st.caption("Searches English Wikipedia article titles and snippets.")
+    elif source == "Crossref works":
+        query = st.text_input("Publication search", placeholder="e.g. battery recycling")
+        st.caption("Searches scholarly metadata, including DOI, authors, venue, and citations.")
+    elif source == "PubMed articles":
+        query = st.text_input("Medical research search", placeholder="e.g. sleep and memory")
+        st.caption("Searches PubMed article metadata through NCBI E-utilities.")
+    elif source == "Open-Meteo weather":
+        query = st.text_input("City or location", placeholder="e.g. Stockholm, Sweden")
+        st.caption("Uses public geocoding and daily weather forecast APIs. Up to 16 forecast days; no key needed for non-commercial use.")
     else:
         query = st.text_input("Project name or topic", placeholder="e.g. food waste, health tracking, multiplayer games")
-        st.caption("Searches Hacker News, GitHub, Stack Overflow, arXiv, and Open Library, then combines matching records.")
-    count = st.slider("Number of records", min_value=10, max_value=100, value=30, step=10)
-    st.caption("Requests are limited to the selected record count (maximum 100).")
+        st.caption("Searches all eight topic-search providers and combines matching records.")
+    if source == "Open-Meteo weather":
+        count = st.slider("Forecast days", min_value=1, max_value=16, value=7, step=1)
+    else:
+        count = st.slider("Number of records", min_value=10, max_value=100, value=30, step=10)
+        st.caption("Requests are limited to the selected record count (maximum 100).")
     st.markdown("---")
     st.markdown("### AI enrichment")
     default_key = os.getenv("OPENAI_API_KEY", "")
