@@ -6,6 +6,9 @@ import html
 import json
 import os
 import re
+import threading
+import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,13 +19,19 @@ import requests
 HN_API = "https://hacker-news.firebaseio.com/v0"
 GITHUB_API = "https://api.github.com"
 STACK_API = "https://api.stackexchange.com/2.3"
+ARXIV_API = "https://export.arxiv.org/api/query"
+OPEN_LIBRARY_API = "https://openlibrary.org/search.json"
 OUTPUT = Path(__file__).parent / "output"
 HN_FEEDS = {"top", "new", "best", "ask", "show", "jobs"}
 SOURCES = {
     "Hacker News": "hacker_news",
     "GitHub repositories": "github",
     "Stack Overflow questions": "stackoverflow",
+    "arXiv papers": "arxiv",
+    "Open Library books": "open_library",
 }
+_ARXIV_REQUEST_LOCK = threading.Lock()
+_ARXIV_LAST_REQUEST = 0.0
 
 
 def _get_json(url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: int = 20) -> Any:
@@ -120,6 +129,8 @@ def collect_stackoverflow_questions(
     if sort not in {"votes", "activity", "creation", "hot", "week", "month"}:
         raise ValueError("Choose a supported Stack Exchange question sort.")
     tags = ";".join(part.strip() for part in tag.split(";") if part.strip())[:200]
+    if len([part for part in tags.split(";") if part]) > 5:
+        raise ValueError("Stack Overflow accepts at most five tags in this search.")
     params: dict[str, Any] = {"site": site, "order": "desc", "sort": sort, "pagesize": count}
     if tags:
         params["tagged"] = tags
@@ -148,6 +159,91 @@ def collect_stackoverflow_questions(
     return rows
 
 
+def collect_arxiv_papers(count: int = 30, query: str = "machine learning") -> list[dict[str, Any]]:
+    """Search arXiv's public Atom API and normalize paper metadata."""
+    terms = re.findall(r"[\w.-]+", (query or "machine learning"), flags=re.UNICODE)
+    if not terms:
+        raise ValueError("Enter at least one search term for arXiv.")
+    search_query = " AND ".join(f"all:{term}" for term in terms[:8])
+    global _ARXIV_LAST_REQUEST
+    with _ARXIV_REQUEST_LOCK:
+        wait_seconds = 3 - (time.monotonic() - _ARXIV_LAST_REQUEST)
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        response = requests.get(
+            ARXIV_API,
+            params={"search_query": search_query, "start": 0, "max_results": count, "sortBy": "relevance", "sortOrder": "descending"},
+            timeout=30,
+            headers={"User-Agent": "TrendForge/2.1 (educational metadata search)"},
+        )
+        _ARXIV_LAST_REQUEST = time.monotonic()
+    response.raise_for_status()
+    root = ET.fromstring(response.content)
+    ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+    rows = []
+    for entry in root.findall("atom:entry", ns):
+        identifier = (entry.findtext("atom:id", default="", namespaces=ns) or "").strip()
+        authors = [node.text.strip() for node in entry.findall("atom:author/atom:name", ns) if node.text]
+        categories = [node.get("term", "") for node in entry.findall("atom:category", ns)]
+        rows.append({
+            "id": f"arxiv:{identifier.rsplit('/', 1)[-1]}",
+            "type": "paper",
+            "title": " ".join((entry.findtext("atom:title", default="", namespaces=ns) or "").split()),
+            "url": identifier.replace("http://", "https://", 1),
+            "domain": "arxiv.org",
+            "author": "; ".join(authors),
+            "score": "",
+            "comments": "",
+            "created_at": entry.findtext("atom:published", default="", namespaces=ns),
+            "text": " ".join((entry.findtext("atom:summary", default="", namespaces=ns) or "").split()),
+            "source": "arXiv public Atom API",
+            "categories": ";".join(categories),
+            "updated_at": entry.findtext("atom:updated", default="", namespaces=ns),
+            "ai_topic": "",
+            "ai_summary": "",
+        })
+    return rows
+
+
+def collect_open_library_books(count: int = 30, query: str = "science") -> list[dict[str, Any]]:
+    """Search Open Library's public works search API."""
+    query = (query or "science").strip()[:200]
+    if not query:
+        raise ValueError("Enter a book search term.")
+    payload = _get_json(
+        OPEN_LIBRARY_API,
+        params={
+            "q": query,
+            "limit": count,
+            "fields": "key,title,author_name,first_publish_year,edition_count,subject,isbn",
+        },
+        headers={"User-Agent": "TrendForge/2.1 (educational metadata search)"},
+    )
+    rows = []
+    for book in payload.get("docs", []):
+        key = book.get("key", "")
+        rows.append({
+            "id": f"openlibrary:{key.rsplit('/', 1)[-1]}",
+            "type": "book",
+            "title": book.get("title", ""),
+            "url": f"https://openlibrary.org{key}" if key else "",
+            "domain": "openlibrary.org",
+            "author": "; ".join(book.get("author_name", [])),
+            "score": book.get("edition_count", ""),
+            "comments": "",
+            "created_at": "",
+            "text": "; ".join((book.get("subject") or [])[:12]),
+            "source": "Open Library Search API",
+            "first_publish_year": book.get("first_publish_year", ""),
+            "edition_count": book.get("edition_count", ""),
+            "subjects": ";".join((book.get("subject") or [])[:12]),
+            "isbn": ";".join((book.get("isbn") or [])[:3]),
+            "ai_topic": "",
+            "ai_summary": "",
+        })
+    return rows
+
+
 def collect_dataset(
     source: str, count: int, *, feed: str = "top", query: str = "stars:>100", tag: str = "", sort: str = "votes"
 ) -> tuple[list[dict[str, Any]], str]:
@@ -160,6 +256,10 @@ def collect_dataset(
         return collect_github_repositories(count, query), f"{source} · {query or 'stars:>100'}"
     if source == "Stack Overflow questions":
         return collect_stackoverflow_questions(count, tag, sort), f"{source} · {tag or 'all tags'} · {sort}"
+    if source == "arXiv papers":
+        return collect_arxiv_papers(count, query), f"{source} · {query or 'machine learning'}"
+    if source == "Open Library books":
+        return collect_open_library_books(count, query), f"{source} · {query or 'science'}"
     raise ValueError(f"Unsupported source: {source}")
 
 
@@ -213,3 +313,4 @@ def prepare_kaggle_package(rows: list[dict[str, Any]], username: str, slug: str,
         encoding="utf-8",
     )
     return folder
+
