@@ -1,11 +1,12 @@
-# TrendForge — AI Dataset Studio
+# TrendForge — Multi-Source Dataset Studio
 
-TrendForge collects a small, timestamped snapshot of Hacker News stories, normalizes it into a tidy table, optionally adds AI-generated topic labels and summaries, and packages the result for Kaggle.
+TrendForge collects point-in-time snapshots from Hacker News, GitHub, and Stack Overflow, normalizes them into inspectable tables, optionally adds AI-generated topic labels and summaries, and prepares packages for Kaggle.
 
 ## What it does
 
-- Collects a bounded selection from the official Hacker News Firebase API feeds: top, new, best, Ask HN, Show HN, or jobs.
-- Normalizes each story into consistent fields such as title, domain, score, comment count, and UTC submission time.
+- Collects up to 100 records from three public APIs: Hacker News feeds, GitHub repository search, and Stack Overflow questions.
+- Lets you choose source-specific filters: Hacker News feed, GitHub search qualifiers, or Stack Overflow tags and ranking.
+- Normalizes results into common fields such as title, URL, author, score, and UTC creation time while retaining source-specific fields such as GitHub stars or Stack Overflow tags.
 - Optionally enriches titles with concise AI topic labels and summaries. AI enrichment is opt-in and requires your own OpenAI API key.
 - Previews the dataset, lets you download a CSV, and prepares a Kaggle-ready folder with metadata and source notes.
 - Keeps upload explicit: packages remain local until you run the uploader. Public upload requires a second explicit confirmation.
@@ -22,7 +23,9 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-In the sidebar, choose a feed and a maximum of 100 stories, then click **Collect stories**. The official API returns story IDs first and each story as an item record; this app limits each run to the selected number and uses a small worker pool.
+In the sidebar, choose a source and up to 100 records, then click **Collect dataset**. Hacker News supports top, new, best, Ask HN, Show HN, and jobs feeds. GitHub accepts repository search qualifiers such as `python stars:>1000`. Stack Overflow supports optional semicolon-separated tags and ranking by votes, activity, or creation. GitHub's unauthenticated search has a low rate limit, so avoid rapid repeated requests.
+
+All three collectors use public APIs and do not require a source account or API key. Check each provider's current API terms and limits before publishing collected data.
 
 ### Optional AI enrichment
 
@@ -30,7 +33,7 @@ Enter an OpenAI API key in the sidebar for one run, or copy `.env.example` to `.
 
 ## Prepare and upload to Kaggle
 
-The app's **Prepare Kaggle package** button writes a CSV, metadata, and source notes under `output/<dataset-slug>/`. It does not upload anything.
+The app's **Prepare Kaggle package** button writes a CSV, metadata, and source notes under `output/<dataset-slug>/`. It does not upload anything. CSV columns vary by source; common fields are kept consistent, and available source-specific fields are included where relevant.
 
 1. Review the generated CSV and metadata, and confirm the source's current terms and attribution requirements.
 2. Install and configure the Kaggle CLI with your own account credentials. Never commit `kaggle.json` or API tokens.
@@ -52,15 +55,15 @@ Kaggle's CLI supports creating datasets from a folder containing `dataset-metada
 
 To prepare a reviewed Version 3 package from a downloaded CSV, run:
 
-```cmd
+```powershell
 py clean_dataset.py "C:\path\to\hacker_news_stories.csv" --username your-kaggle-username
 ```
 
-The cleaner keeps story rows, excludes the reviewed sample row ID `50378228`, drops AI annotation columns only when entirely blank, checks required fields and duplicate IDs/URLs, and adds `prepared_at_utc`. It writes a new folder under `output/hacker-news-top-snapshot-v3/` and does not upload anything. Review the CSV and source attribution before publishing. If the Kaggle dataset already exists, publish as a new version with `kaggle datasets version`, not `kaggle datasets create`.
+The cleaner keeps story rows, excludes the reviewed sample row ID `50378228`, drops AI annotation columns when they are entirely blank, checks required fields and duplicate IDs/URLs, and adds `prepared_at_utc`. It writes a new folder under `output/hacker-news-top-snapshot-v3/` and does not upload anything. Review the output CSV before publishing it. If the Kaggle dataset already exists, publish the folder as a new version with `kaggle datasets version`, not `kaggle datasets create`.
 
 ## Dataset schema
 
-`id`, `type`, `title`, `url`, `domain`, `author`, `score`, `comments`, `created_at`, `text`, `ai_topic`, `ai_summary`, `source`.
+Common fields include `id`, `type`, `title`, `url`, `domain`, `author`, `score`, `comments`, `created_at`, `text`, `ai_topic`, `ai_summary`, and `source`. Extra fields depend on the source: GitHub adds `stars`, `forks`, `open_issues`, `language`, and `license`; Stack Overflow adds `answers`, `views`, and `tags`. A field can be blank when that API does not provide an equivalent value.
 
 AI annotations can be imperfect. They are separate from source fields and should be checked before being used for analysis. Each run is a point-in-time snapshot; scores and comments change over time.
 
@@ -69,9 +72,8 @@ AI annotations can be imperfect. They are separate from source fields and should
 ```text
 trendforge/
 ├── app.py                 # Streamlit interface
-├── trendforge.py          # API ingestion, normalization, AI enrichment, packaging
+├── trendforge.py          # Multi-source API ingestion, normalization, AI enrichment, packaging
 ├── kaggle_upload.py       # Explicit, private-by-default Kaggle uploader
-├── clean_dataset.py       # Clean a downloaded CSV for a reviewed new version
 ├── requirements.txt
 ├── .env.example
 └── output/                # Generated data (git-ignored)
@@ -79,4 +81,4 @@ trendforge/
 
 ## Data source
 
-Hacker News official API documentation: <https://github.com/HackerNews/API>. This project reads public story metadata from that API. It does not scrape article pages or collect comments or user profiles.
+This project uses public endpoints documented by [Hacker News](https://github.com/HackerNews/API), [GitHub REST API](https://docs.github.com/en/rest/search/search), and the [Stack Exchange API](https://api.stackexchange.com/docs). It does not scrape article pages or collect private account data.
