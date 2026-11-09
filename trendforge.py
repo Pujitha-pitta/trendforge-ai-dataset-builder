@@ -17,6 +17,7 @@ import pandas as pd
 import requests
 
 HN_API = "https://hacker-news.firebaseio.com/v0"
+HN_SEARCH_API = "https://hn.algolia.com/api/v1/search"
 GITHUB_API = "https://api.github.com"
 STACK_API = "https://api.stackexchange.com/2.3"
 ARXIV_API = "https://export.arxiv.org/api/query"
@@ -29,6 +30,7 @@ SOURCES = {
     "Stack Overflow questions": "stackoverflow",
     "arXiv papers": "arxiv",
     "Open Library books": "open_library",
+    "Project topic search": "project_topic",
 }
 _ARXIV_REQUEST_LOCK = threading.Lock()
 _ARXIV_LAST_REQUEST = 0.0
@@ -91,6 +93,32 @@ def collect_hacker_news(feed: str = "top", count: int = 30) -> list[dict[str, An
     return rows
 
 
+def collect_hacker_news_topic(query: str, count: int) -> list[dict[str, Any]]:
+    """Search Hacker News stories by a project/topic phrase via the public Algolia HN index."""
+    payload = _get_json(HN_SEARCH_API, params={"query": query, "tags": "story", "hitsPerPage": count})
+    rows = []
+    for hit in payload.get("hits", []):
+        item_id = hit.get("objectID", "")
+        link = hit.get("url") or (f"https://news.ycombinator.com/item?id={item_id}" if item_id else "")
+        domain = requests.utils.urlparse(link).netloc.lower() if link else "news.ycombinator.com"
+        rows.append({
+            "id": f"hn:{item_id}",
+            "type": "story",
+            "title": hit.get("title", ""),
+            "url": link,
+            "domain": re.sub(r"^www\.", "", domain),
+            "author": hit.get("author", ""),
+            "score": hit.get("points", 0),
+            "comments": hit.get("num_comments", 0),
+            "created_at": hit.get("created_at", ""),
+            "text": "",
+            "source": "Hacker News Algolia Search API",
+            "ai_topic": "",
+            "ai_summary": "",
+        })
+    return rows
+
+
 def collect_github_repositories(count: int = 30, query: str = "stars:>100") -> list[dict[str, Any]]:
     query = (query or "stars:>100").strip()[:256]
     payload = _get_json(
@@ -124,17 +152,25 @@ def collect_github_repositories(count: int = 30, query: str = "stars:>100") -> l
 
 
 def collect_stackoverflow_questions(
-    count: int = 30, tag: str = "", sort: str = "votes", site: str = "stackoverflow"
+    count: int = 30, tag: str = "", sort: str = "votes", site: str = "stackoverflow", keyword: str = ""
 ) -> list[dict[str, Any]]:
-    if sort not in {"votes", "activity", "creation", "hot", "week", "month"}:
+    allowed_sorts = {"votes", "activity", "creation", "hot", "week", "month"}
+    if keyword:
+        allowed_sorts.add("relevance")
+    if sort not in allowed_sorts:
         raise ValueError("Choose a supported Stack Exchange question sort.")
     tags = ";".join(part.strip() for part in tag.split(";") if part.strip())[:200]
     if len([part for part in tags.split(";") if part]) > 5:
         raise ValueError("Stack Overflow accepts at most five tags in this search.")
     params: dict[str, Any] = {"site": site, "order": "desc", "sort": sort, "pagesize": count}
-    if tags:
-        params["tagged"] = tags
-    payload = _get_json(f"{STACK_API}/questions", params=params)
+    if keyword:
+        params["intitle"] = keyword[:100]
+        endpoint = "search/advanced"
+    else:
+        if tags:
+            params["tagged"] = tags
+        endpoint = "questions"
+    payload = _get_json(f"{STACK_API}/{endpoint}", params=params)
     rows = []
     for question in payload.get("items", []):
         owner = question.get("owner") or {}
@@ -260,6 +296,31 @@ def collect_dataset(
         return collect_arxiv_papers(count, query), f"{source} · {query or 'machine learning'}"
     if source == "Open Library books":
         return collect_open_library_books(count, query), f"{source} · {query or 'science'}"
+    if source == "Project topic search":
+        topic = (query or "").strip()
+        if not topic:
+            raise ValueError("Enter a project name or topic to search.")
+        providers = [
+            ("Hacker News", lambda n: collect_hacker_news_topic(topic, n)),
+            ("GitHub", lambda n: collect_github_repositories(n, topic)),
+            ("Stack Overflow", lambda n: collect_stackoverflow_questions(n, sort="relevance", keyword=topic)),
+            ("arXiv", lambda n: collect_arxiv_papers(n, topic)),
+            ("Open Library", lambda n: collect_open_library_books(n, topic)),
+        ]
+        per_provider, extra = divmod(count, len(providers))
+        combined: list[dict[str, Any]] = []
+        for index, (provider, collector) in enumerate(providers):
+            provider_count = per_provider + (1 if index < extra else 0)
+            try:
+                hits = collector(provider_count)
+                for row in hits:
+                    row["project_topic"] = topic
+                combined.extend(hits)
+            except requests.RequestException:
+                continue
+        if not combined:
+            raise ValueError("No records were returned. Check the topic and try again.")
+        return combined, f"Project topic search · {topic}"
     raise ValueError(f"Unsupported source: {source}")
 
 
