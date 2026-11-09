@@ -1,12 +1,13 @@
 # TrendForge — Multi-Source Dataset Studio
 
-TrendForge collects point-in-time snapshots from Hacker News, GitHub, Stack Overflow, arXiv, and Open Library, normalizes them into inspectable tables, optionally adds AI-generated topic labels and summaries, and prepares packages for Kaggle. Project Topic Search combines keyword-matched records from all five providers into one project-focused dataset.
+TrendForge collects point-in-time snapshots from eight public topic-search APIs, plus location-based Open-Meteo forecasts. It normalizes records into inspectable tables, optionally adds AI-generated topic labels and summaries, and prepares packages for Kaggle. Project Topic Search combines keyword-matched records from eight providers into one project-focused dataset.
 
 ## What it does
 
-- Collects up to 100 records from five public APIs: Hacker News feeds, GitHub repository search, Stack Overflow questions, arXiv papers, and Open Library books.
-- Lets you choose source-specific filters: Hacker News feed, GitHub search qualifiers, Stack Overflow tags and ranking, arXiv search terms, or Open Library book search.
-- Searches across all five providers with one project or topic phrase and combines the returned real records into a single dataset.
+- Collects records from Hacker News, GitHub, Stack Overflow, arXiv, Open Library, Wikipedia, Crossref, and PubMed.
+- Collects daily location-based weather forecasts from Open-Meteo, with a forecast range of up to 16 days.
+- Lets you choose source-specific filters: feed, repository qualifiers, tags, publication terms, medical research terms, or book/article searches.
+- Searches across eight topic-search providers with one project or topic phrase and combines the returned real records into a single dataset.
 - Normalizes results into common fields such as title, URL, author, score, and UTC creation time while retaining source-specific fields such as GitHub stars or Stack Overflow tags.
 - Optionally enriches titles with concise AI topic labels and summaries. AI enrichment is opt-in and requires your own OpenAI API key.
 - Previews the dataset, lets you download a CSV, and prepares a Kaggle-ready folder with metadata and source notes.
@@ -24,9 +25,9 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-In the sidebar, choose a source and up to 100 records, then click **Collect dataset**. Hacker News supports top, new, best, Ask HN, Show HN, and jobs feeds. GitHub accepts repository search qualifiers such as `python stars:>1000`. Stack Overflow supports up to five semicolon-separated tags and ranking. arXiv and Open Library accept keyword searches. **Project topic search** distributes the requested record count across all five providers and adds the search phrase to each row.
+In the sidebar, choose a source and click **Collect dataset**. Hacker News supports top, new, best, Ask HN, Show HN, and jobs feeds. GitHub accepts repository search qualifiers such as `python stars:>1000`. Stack Overflow supports up to five semicolon-separated tags and ranking. arXiv, Open Library, Wikipedia, Crossref, and PubMed accept keyword searches. **Project topic search** distributes the requested record count across eight providers and adds the search phrase to each row. **Open-Meteo weather** accepts a city or location and returns up to 16 forecast days.
 
-All collectors use public APIs and do not require a source account or API key. GitHub's anonymous search has a low rate limit. Open Library describes its Search API as experimental. TrendForge waits three seconds between arXiv requests, as requested in arXiv's API manual. Project topic search uses the Hacker News Search API powered by Algolia. Check current provider terms before publishing collected data.
+The collectors use public APIs; no source account or API key is needed for the included non-commercial workflows. GitHub's anonymous search has a low rate limit. Open Library describes its Search API as experimental. TrendForge waits three seconds between arXiv requests, as requested in arXiv's API manual. Open-Meteo's free API is for non-commercial use. Project topic search uses the Hacker News Search API powered by Algolia. Review all source terms and attribution requirements before publishing collected data.
 
 ### Optional AI enrichment
 
@@ -64,7 +65,7 @@ The cleaner keeps story rows, excludes the reviewed sample row ID `50378228`, dr
 
 ## Dataset schema
 
-Common fields include `id`, `type`, `title`, `url`, `domain`, `author`, `score`, `comments`, `created_at`, `text`, `ai_topic`, `ai_summary`, and `source`. Project topic search also adds `project_topic`. Extra fields depend on the source: GitHub adds `stars`, `forks`, `open_issues`, `language`, and `license`; Stack Overflow adds `answers`, `views`, and `tags`; arXiv adds `categories` and `updated_at`; Open Library adds `first_publish_year`, `edition_count`, `subjects`, and `isbn`. A field can be blank when that API does not provide an equivalent value.
+Common fields include `id`, `type`, `title`, `url`, `domain`, `author`, `score`, `comments`, `created_at`, `text`, `ai_topic`, `ai_summary`, and `source`. Project topic search also adds `project_topic`. Extra fields depend on the source: GitHub adds `stars`, `forks`, `open_issues`, `language`, and `license`; Stack Overflow adds `answers`, `views`, and `tags`; arXiv adds `categories` and `updated_at`; Open Library adds `first_publish_year`, `edition_count`, `subjects`, and `isbn`; Wikipedia adds `page_id` and `word_count`; Crossref adds `doi`, `journal`, `publisher`, and `citations`; PubMed adds `pmid`, `journal`, `doi`, and `publication_type`; Open-Meteo adds forecast date, location, temperatures, precipitation, wind speed, and weather code. A field can be blank when that API does not provide an equivalent value.
 
 AI annotations can be imperfect. They are separate from source fields and should be checked before being used for analysis. Each run is a point-in-time snapshot; scores and comments change over time.
 
@@ -82,5 +83,5 @@ trendforge/
 
 ## Data source
 
-This project uses public endpoints documented by [Hacker News](https://github.com/HackerNews/API), the [Hacker News Search API by Algolia](https://hn.algolia.com/api), [GitHub REST API](https://docs.github.com/en/rest/search/search), the [Stack Exchange API](https://api.stackexchange.com/docs), the [arXiv API](https://info.arxiv.org/help/api/user-manual.html), and [Open Library Search API](https://openlibrary.org/dev/docs/api/search). It does not scrape article pages or collect private account data.
+This project uses public endpoints documented by [Hacker News](https://github.com/HackerNews/API), [Hacker News Search API by Algolia](https://hn.algolia.com/api), [GitHub REST API](https://docs.github.com/en/rest/search/search), [Stack Exchange API](https://api.stackexchange.com/docs), [arXiv API](https://info.arxiv.org/help/api/user-manual.html), [Open Library Search API](https://openlibrary.org/dev/docs/api/search), [MediaWiki Search API](https://www.mediawiki.org/wiki/API:Search/en), [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/), [NCBI E-utilities](https://www.ncbi.nlm.nih.gov/home/develop/api/), and [Open-Meteo Forecast and Geocoding APIs](https://open-meteo.com/en/docs). It does not scrape article pages or collect private account data.
 
