@@ -1,16 +1,16 @@
-"""TrendForge: turn Hacker News stories into an enriched, Kaggle-ready dataset."""
+"""TrendForge: collect and package public data from multiple APIs."""
 
 from __future__ import annotations
 
+import html
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from trendforge import build_dataset, prepare_kaggle_package
+from trendforge import SOURCES, collect_dataset, enrich_with_ai, prepare_kaggle_package
 
 
 load_dotenv()
@@ -38,26 +38,46 @@ hr { border-color:var(--line); }
 
 st.markdown('<div class="eyebrow">OPEN DATA PIPELINE · PYTHON + AI</div>', unsafe_allow_html=True)
 st.markdown('<div class="hero">Signal in<br><em>the stream.</em></div>', unsafe_allow_html=True)
-st.markdown('<div class="intro">Collect a snapshot of Hacker News stories, enrich them with AI topic labels, and prepare a tidy dataset you can inspect, download, or publish to Kaggle.</div>', unsafe_allow_html=True)
+st.markdown('<div class="intro">Collect snapshots from Hacker News, GitHub, or Stack Overflow. Add optional AI labels, inspect the results, and prepare a tidy dataset for Kaggle.</div>', unsafe_allow_html=True)
 st.write("")
 
 with st.sidebar:
     st.markdown("### Build a dataset")
-    feed = st.selectbox("Story feed", ["top", "new", "best", "ask", "show", "jobs"])
-    count = st.slider("Number of stories", min_value=10, max_value=100, value=30, step=10)
-    st.caption("Uses the official Hacker News Firebase API. Requests are limited to the selected story count.")
+    source = st.selectbox("Data source", list(SOURCES))
+    feed = "top"
+    query = "stars:>100"
+    tag = ""
+    sort = "votes"
+    if source == "Hacker News":
+        feed = st.selectbox("Hacker News feed", ["top", "new", "best", "ask", "show", "jobs"])
+        st.caption("Uses the official Hacker News Firebase API.")
+    elif source == "GitHub repositories":
+        query = st.text_input("Repository search", value="stars:>100", help="Use GitHub search qualifiers, for example: python stars:>1000")
+        st.caption("Uses GitHub's public repository search API. Anonymous requests have a low rate limit.")
+    else:
+        tag = st.text_input("Stack Overflow tags (optional)", placeholder="python; pandas", help="Separate multiple tags with semicolons. All entered tags must match.")
+        sort = st.selectbox("Question ranking", ["votes", "activity", "creation", "hot", "week", "month"])
+        st.caption("Uses the public Stack Exchange API for Stack Overflow questions.")
+    count = st.slider("Number of records", min_value=10, max_value=100, value=30, step=10)
+    st.caption("Requests are limited to the selected record count (maximum 100).")
     st.markdown("---")
     st.markdown("### AI enrichment")
     default_key = os.getenv("OPENAI_API_KEY", "")
     api_key = st.text_input("OpenAI API key (optional)", value=default_key, type="password", help="Used only during this run. Without a key, the app still creates a complete dataset.")
     model = st.text_input("Model", value=os.getenv("OPENAI_MODEL", "gpt-4o-mini"))
     st.caption("AI adds a concise topic label and one-line summary. API usage may incur provider charges.")
-    run = st.button("Collect stories", type="primary", use_container_width=True)
+    run = st.button("Collect dataset", type="primary", use_container_width=True)
 
 if run:
-    with st.spinner("Collecting stories and preparing your dataset…"):
+    st.session_state.dataset = None
+    with st.spinner("Collecting records and preparing your dataset…"):
         try:
-            st.session_state.dataset = build_dataset(feed=feed, count=count, api_key=api_key.strip() or None, model=model.strip())
+            rows, source_label = collect_dataset(source, count, feed=feed, query=query, tag=tag, sort=sort)
+            if api_key.strip() and rows:
+                rows = enrich_with_ai(rows, api_key=api_key.strip(), model=model.strip())
+            st.session_state.dataset = rows
+            st.session_state.source = source
+            st.session_state.source_label = source_label
             st.session_state.feed = feed
             st.session_state.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             st.session_state.package_dir = None
@@ -67,34 +87,36 @@ if run:
 data = st.session_state.get("dataset")
 if data is None:
     st.write("")
-    st.info("Choose a feed and press **Collect stories** to build your first snapshot.")
+    st.info("Choose a source and press **Collect dataset** to build your first snapshot.")
     st.markdown("#### What this project demonstrates")
-    st.write("API ingestion · data cleaning · optional LLM enrichment · CSV export · Kaggle dataset packaging")
+    st.write("Multi-source API ingestion · data cleaning · optional AI enrichment · CSV export · Kaggle dataset packaging")
 else:
     frame = pd.DataFrame(data)
-    st.markdown(f'<div class="eyebrow">{st.session_state.feed.upper()} FEED · BUILT {st.session_state.generated_at}</div>', unsafe_allow_html=True)
+    source_label = st.session_state.source_label
+    st.markdown(f'<div class="eyebrow">{html.escape(source_label.upper())} · BUILT {st.session_state.generated_at}</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
-    c1.markdown(f'<div class="metric"><div class="metric-label">Stories collected</div><div class="metric-value">{len(frame)}</div></div>', unsafe_allow_html=True)
+    c1.markdown(f'<div class="metric"><div class="metric-label">Records collected</div><div class="metric-value">{len(frame)}</div></div>', unsafe_allow_html=True)
     topics = frame["ai_topic"].replace("", pd.NA).nunique() if "ai_topic" in frame else 0
     c2.markdown(f'<div class="metric"><div class="metric-label">Distinct topics</div><div class="metric-value">{topics}</div></div>', unsafe_allow_html=True)
     c3.markdown(f'<div class="metric"><div class="metric-label">AI enriched</div><div class="metric-value">{"Yes" if frame.get("ai_summary", pd.Series(dtype=str)).fillna("").ne("").any() else "No"}</div></div>', unsafe_allow_html=True)
     st.write("")
     st.markdown("### Dataset preview")
     st.dataframe(frame, use_container_width=True, hide_index=True)
-    st.download_button("Download CSV", data=frame.to_csv(index=False).encode("utf-8"), file_name=f"hacker_news_{st.session_state.feed}.csv", mime="text/csv")
+    source_file = SOURCES[st.session_state.source]
+    st.download_button("Download CSV", data=frame.to_csv(index=False).encode("utf-8-sig"), file_name=f"{source_file}_snapshot.csv", mime="text/csv")
 
     st.markdown("---")
     st.markdown("### Prepare for Kaggle")
     username = st.text_input("Your Kaggle username", placeholder="your-kaggle-username")
-    slug = st.text_input("Dataset slug", value=f"hacker-news-{st.session_state.feed}-snapshot")
+    suggested_slug = f"{source_file}-{st.session_state.get('feed', 'snapshot')}-snapshot" if source_file == "hacker_news" else f"{source_file}-snapshot"
+    slug = st.text_input("Dataset slug", value=suggested_slug)
     if st.button("Prepare Kaggle package"):
         if not username.strip() or not slug.strip():
             st.warning("Enter your Kaggle username and a dataset slug first.")
         else:
-            package = prepare_kaggle_package(data, username.strip(), slug.strip(), st.session_state.feed)
+            package = prepare_kaggle_package(data, username.strip(), slug.strip(), source_label)
             st.session_state.package_dir = str(package)
             st.success(f"Package prepared locally at `{package}`. Nothing has been uploaded.")
     if st.session_state.get("package_dir"):
         st.code(f'kaggle datasets create -p "{st.session_state.package_dir}"', language="powershell")
         st.caption("The Kaggle CLI creates the dataset as private by default. Review the files and source attribution before uploading. Add --public only if you deliberately want public distribution.")
-
