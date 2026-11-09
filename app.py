@@ -54,10 +54,16 @@ with st.sidebar:
     elif source == "GitHub repositories":
         query = st.text_input("Repository search", value="stars:>100", help="Use GitHub search qualifiers, for example: python stars:>1000")
         st.caption("Uses GitHub's public repository search API. Anonymous requests have a low rate limit.")
-    else:
+    elif source == "Stack Overflow questions":
         tag = st.text_input("Stack Overflow tags (optional)", placeholder="python; pandas", help="Separate multiple tags with semicolons. All entered tags must match.")
         sort = st.selectbox("Question ranking", ["votes", "activity", "creation", "hot", "week", "month"])
         st.caption("Uses the public Stack Exchange API for Stack Overflow questions.")
+    elif source == "arXiv papers":
+        query = st.text_input("Paper search", value="machine learning", help="Searches paper titles, abstracts, and metadata.")
+        st.caption("Uses arXiv's public Atom API. Search for research papers by keyword.")
+    else:
+        query = st.text_input("Book search", value="science", help="Search book titles, authors, and catalog metadata.")
+        st.caption("Uses Open Library's public Search API.")
     count = st.slider("Number of records", min_value=10, max_value=100, value=30, step=10)
     st.caption("Requests are limited to the selected record count (maximum 100).")
     st.markdown("---")
@@ -120,3 +126,4 @@ else:
     if st.session_state.get("package_dir"):
         st.code(f'kaggle datasets create -p "{st.session_state.package_dir}"', language="powershell")
         st.caption("The Kaggle CLI creates the dataset as private by default. Review the files and source attribution before uploading. Add --public only if you deliberately want public distribution.")
+
