@@ -22,6 +22,11 @@ GITHUB_API = "https://api.github.com"
 STACK_API = "https://api.stackexchange.com/2.3"
 ARXIV_API = "https://export.arxiv.org/api/query"
 OPEN_LIBRARY_API = "https://openlibrary.org/search.json"
+WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
+CROSSREF_API = "https://api.crossref.org/works"
+NCBI_API = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+OPEN_METEO_GEOCODING_API = "https://geocoding-api.open-meteo.com/v1/search"
+OPEN_METEO_FORECAST_API = "https://api.open-meteo.com/v1/forecast"
 OUTPUT = Path(__file__).parent / "output"
 HN_FEEDS = {"top", "new", "best", "ask", "show", "jobs"}
 SOURCES = {
@@ -31,13 +36,17 @@ SOURCES = {
     "arXiv papers": "arxiv",
     "Open Library books": "open_library",
     "Project topic search": "project_topic",
+    "Wikipedia articles": "wikipedia",
+    "Crossref works": "crossref",
+    "PubMed articles": "pubmed",
+    "Open-Meteo weather": "open_meteo",
 }
 _ARXIV_REQUEST_LOCK = threading.Lock()
 _ARXIV_LAST_REQUEST = 0.0
 
 
 def _get_json(url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: int = 20) -> Any:
-    request_headers = {"User-Agent": "TrendForge/2.0 (educational dataset builder)"}
+    request_headers = {"User-Agent": "TrendForge/2.3 (https://github.com/Pujitha-pitta/trendforge-ai-dataset-builder)"}
     if headers:
         request_headers.update(headers)
     response = requests.get(url, params=params, timeout=timeout, headers=request_headers)
@@ -280,6 +289,175 @@ def collect_open_library_books(count: int = 30, query: str = "science") -> list[
     return rows
 
 
+def collect_wikipedia_articles(count: int = 30, query: str = "science") -> list[dict[str, Any]]:
+    """Search English Wikipedia pages with the MediaWiki Action API."""
+    query = (query or "").strip()[:200]
+    if not query:
+        raise ValueError("Enter a Wikipedia search term.")
+    payload = _get_json(
+        WIKIPEDIA_API,
+        params={"action": "query", "list": "search", "srsearch": query, "srlimit": count, "srprop": "snippet|timestamp", "format": "json", "formatversion": 2},
+    )
+    rows = []
+    for page in payload.get("query", {}).get("search", []):
+        page_id = page.get("pageid", "")
+        rows.append({
+            "id": f"wikipedia:{page_id}",
+            "type": "article",
+            "title": page.get("title", ""),
+            "url": f"https://en.wikipedia.org/?curid={page_id}" if page_id else "",
+            "domain": "en.wikipedia.org",
+            "author": "",
+            "score": page.get("wordcount", ""),
+            "comments": "",
+            "created_at": page.get("timestamp", ""),
+            "text": _clean_html(page.get("snippet", "")),
+            "source": "Wikipedia MediaWiki Search API",
+            "page_id": page_id,
+            "word_count": page.get("wordcount", ""),
+            "ai_topic": "",
+            "ai_summary": "",
+        })
+    return rows
+
+
+def collect_crossref_works(count: int = 30, query: str = "science") -> list[dict[str, Any]]:
+    """Search Crossref's public scholarly metadata."""
+    query = (query or "").strip()[:200]
+    if not query:
+        raise ValueError("Enter a Crossref search term.")
+    payload = _get_json(
+        CROSSREF_API,
+        params={
+            "query.bibliographic": query,
+            "rows": count,
+            "select": "DOI,title,author,published,URL,type,container-title,is-referenced-by-count,subject,publisher",
+        },
+    )
+    rows = []
+    for work in payload.get("message", {}).get("items", []):
+        title = (work.get("title") or [""])[0]
+        authors = [" ".join(part for part in (author.get("given"), author.get("family")) if part) for author in work.get("author", [])]
+        date_parts = (work.get("published") or {}).get("date-parts", [[]])[0]
+        published = "-".join(f"{part:02d}" if index > 0 else str(part) for index, part in enumerate(date_parts))
+        doi = work.get("DOI", "")
+        rows.append({
+            "id": f"crossref:{doi or work.get('URL', '')}",
+            "type": work.get("type", "work"),
+            "title": title,
+            "url": work.get("URL", ""),
+            "domain": "doi.org" if doi else "",
+            "author": "; ".join(authors),
+            "score": work.get("is-referenced-by-count", ""),
+            "comments": "",
+            "created_at": published,
+            "text": "; ".join((work.get("subject") or [])[:10]),
+            "source": "Crossref REST API",
+            "doi": doi,
+            "journal": "; ".join(work.get("container-title") or []),
+            "publisher": work.get("publisher", ""),
+            "citations": work.get("is-referenced-by-count", ""),
+            "ai_topic": "",
+            "ai_summary": "",
+        })
+    return rows
+
+
+def collect_pubmed_articles(count: int = 30, query: str = "health") -> list[dict[str, Any]]:
+    """Search PubMed using NCBI E-utilities without requiring an API key."""
+    query = (query or "").strip()[:200]
+    if not query:
+        raise ValueError("Enter a PubMed search term.")
+    search = _get_json(f"{NCBI_API}/esearch.fcgi", params={"db": "pubmed", "term": query, "retmax": count, "retmode": "json"})
+    ids = search.get("esearchresult", {}).get("idlist", [])
+    if not ids:
+        return []
+    summary = _get_json(f"{NCBI_API}/esummary.fcgi", params={"db": "pubmed", "id": ",".join(ids), "retmode": "json"})
+    result = summary.get("result", {})
+    rows = []
+    for pmid in result.get("uids", ids):
+        article = result.get(pmid, {})
+        authors = [author.get("name", "") for author in article.get("authors", [])]
+        article_ids = article.get("articleids", [])
+        doi = next((item.get("value", "") for item in article_ids if item.get("idtype") == "doi"), "")
+        rows.append({
+            "id": f"pubmed:{pmid}",
+            "type": "medical_article",
+            "title": _clean_html(article.get("title", "")),
+            "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+            "domain": "pubmed.ncbi.nlm.nih.gov",
+            "author": "; ".join(authors),
+            "score": "",
+            "comments": "",
+            "created_at": article.get("pubdate", ""),
+            "text": article.get("fulljournalname", ""),
+            "source": "NCBI PubMed E-utilities",
+            "pmid": pmid,
+            "journal": article.get("fulljournalname", ""),
+            "doi": doi,
+            "publication_type": ";".join(article.get("pubtype") or []),
+            "ai_topic": "",
+            "ai_summary": "",
+        })
+    return rows
+
+
+def collect_open_meteo_forecast(count: int = 7, location: str = "") -> list[dict[str, Any]]:
+    """Geocode a location and collect up to 16 days of daily forecast data."""
+    location = (location or "").strip()[:120]
+    if not location:
+        raise ValueError("Enter a city or location for the weather forecast.")
+    geocode = _get_json(OPEN_METEO_GEOCODING_API, params={"name": location, "count": 1, "language": "en", "format": "json"})
+    places = geocode.get("results", [])
+    if not places:
+        raise ValueError(f"No location matched '{location}'. Try adding a country name.")
+    place = places[0]
+    forecast_days = max(1, min(count, 16))
+    forecast = _get_json(
+        OPEN_METEO_FORECAST_API,
+        params={
+            "latitude": place["latitude"], "longitude": place["longitude"],
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max",
+            "forecast_days": forecast_days, "timezone": "auto",
+        },
+    )
+    daily = forecast.get("daily", {})
+    descriptions = {0: "Clear", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast", 45: "Fog", 48: "Rime fog", 51: "Light drizzle", 53: "Drizzle", 55: "Dense drizzle", 61: "Light rain", 63: "Rain", 65: "Heavy rain", 71: "Light snow", 73: "Snow", 75: "Heavy snow", 80: "Rain showers", 81: "Rain showers", 82: "Heavy rain showers", 95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Thunderstorm with heavy hail"}
+    rows = []
+    for index, forecast_date in enumerate(daily.get("time", [])):
+        weather_code = (daily.get("weather_code") or [None] * len(daily["time"]))[index]
+        tmax = (daily.get("temperature_2m_max") or [None] * len(daily["time"]))[index]
+        tmin = (daily.get("temperature_2m_min") or [None] * len(daily["time"]))[index]
+        precipitation = (daily.get("precipitation_sum") or [None] * len(daily["time"]))[index]
+        wind = (daily.get("wind_speed_10m_max") or [None] * len(daily["time"]))[index]
+        rows.append({
+            "id": f"open-meteo:{place['latitude']},{place['longitude']}:{forecast_date}",
+            "type": "weather_forecast",
+            "title": f"Forecast for {place.get('name', location)} on {forecast_date}",
+            "url": "https://open-meteo.com/",
+            "domain": "open-meteo.com",
+            "author": "",
+            "score": "",
+            "comments": "",
+            "created_at": "",
+            "text": descriptions.get(weather_code, "Weather forecast"),
+            "source": "Open-Meteo Forecast API",
+            "forecast_date": forecast_date,
+            "location": place.get("name", location),
+            "country": place.get("country", ""),
+            "latitude": place.get("latitude"),
+            "longitude": place.get("longitude"),
+            "temperature_max_c": tmax,
+            "temperature_min_c": tmin,
+            "precipitation_mm": precipitation,
+            "wind_speed_max_kmh": wind,
+            "weather_code": weather_code,
+            "ai_topic": "",
+            "ai_summary": "",
+        })
+    return rows
+
+
 def collect_dataset(
     source: str, count: int, *, feed: str = "top", query: str = "stars:>100", tag: str = "", sort: str = "votes"
 ) -> tuple[list[dict[str, Any]], str]:
@@ -296,6 +474,15 @@ def collect_dataset(
         return collect_arxiv_papers(count, query), f"{source} · {query or 'machine learning'}"
     if source == "Open Library books":
         return collect_open_library_books(count, query), f"{source} · {query or 'science'}"
+    if source == "Wikipedia articles":
+        return collect_wikipedia_articles(count, query), f"{source} · {query}"
+    if source == "Crossref works":
+        return collect_crossref_works(count, query), f"{source} · {query}"
+    if source == "PubMed articles":
+        return collect_pubmed_articles(count, query), f"{source} · {query}"
+    if source == "Open-Meteo weather":
+        days = max(1, min(count, 16))
+        return collect_open_meteo_forecast(days, query), f"{source} · {query} · {days} days"
     if source == "Project topic search":
         topic = (query or "").strip()
         if not topic:
@@ -306,6 +493,9 @@ def collect_dataset(
             ("Stack Overflow", lambda n: collect_stackoverflow_questions(n, sort="relevance", keyword=topic)),
             ("arXiv", lambda n: collect_arxiv_papers(n, topic)),
             ("Open Library", lambda n: collect_open_library_books(n, topic)),
+            ("Wikipedia", lambda n: collect_wikipedia_articles(n, topic)),
+            ("Crossref", lambda n: collect_crossref_works(n, topic)),
+            ("PubMed", lambda n: collect_pubmed_articles(n, topic)),
         ]
         per_provider, extra = divmod(count, len(providers))
         combined: list[dict[str, Any]] = []
